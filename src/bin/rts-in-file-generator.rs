@@ -20,7 +20,7 @@ use mongoose::rts::*;
 enum Opts {
     /// Run the RTS in "patch" mode (direction-independent calibration)
     ///
-    /// The base directory is expected to contain file from only a single
+    /// The base directory is expected to contain files from only a single
     /// observation, and have mwaf files that have been "re-flagged".
     Patch {
         #[structopt(flatten)]
@@ -29,7 +29,7 @@ enum Opts {
 
     /// Run the RTS in "peel" mode (direction-dependent calibration)
     ///
-    /// The base directory is expected to contain file from only a single
+    /// The base directory is expected to contain files from only a single
     /// observation, and have mwaf files that have been "re-flagged".
     Peel {
         /// The number of sources to peel. If not specified, defaults to
@@ -89,7 +89,7 @@ struct Common {
     /// The number of "primary calibrators" to use. This should always be 1 for
     /// a patch. The default is 5 for a peel.
     #[structopt(long)]
-    num_primary_cals: Option<u8>,
+    num_primary_cals: Option<u32>,
 
     /// Save the .in file to a specified location. If not specified, the .in
     /// file contents are printed to stdout.
@@ -208,10 +208,10 @@ impl Opts {
             f_scrunch: common.fscrunch.unwrap_or(2),
             base_freq,
             subband_ids,
-            num_primary_cals: match &mode {
+            num_primary_cals: common.num_primary_cals.unwrap_or(match &mode {
                 RtsMode::Patch => 1,
                 RtsMode::Peel => 5,
-            },
+            }),
             num_cals: common.num_cals,
             num_peel: match &self {
                 Self::Patch { .. } => None,
