@@ -32,6 +32,10 @@ enum Opts {
     /// The base directory is expected to contain files from only a single
     /// observation, and have mwaf files that have been "re-flagged".
     Peel {
+        /// The number of source calibrators to use.
+        #[structopt(short, long)]
+        num_cals: u32,
+
         /// The number of sources to peel. If not specified, defaults to
         /// num_cals.
         #[structopt(long)]
@@ -58,10 +62,6 @@ struct Common {
     /// The path to the source list file.
     #[structopt(short, long, parse(from_os_str))]
     srclist: PathBuf,
-
-    /// The number of source calibrators to use.
-    #[structopt(short, long)]
-    num_cals: u32,
 
     /// The number of integration bins to use. By default, this is determined by
     /// whether we're patching or peeling and the integration time of the
@@ -120,7 +120,18 @@ impl Opts {
 
         let mode = match &self {
             Self::Patch { .. } => RtsMode::Patch,
-            Self::Peel { .. } => RtsMode::Peel,
+            Self::Peel {
+                num_cals, num_peel, ..
+            } => RtsMode::Peel {
+                num_cals: *num_cals,
+                num_peel: if let Some(p) = num_peel {
+                    // If num_peel was specified, use it.
+                    *p
+                } else {
+                    // Otherwise, just use the specified `num_cals`.
+                    *num_cals
+                },
+            },
         };
 
         let (
@@ -141,7 +152,7 @@ impl Opts {
 
         let (corr_dumps_per_cadence, mut num_integration_bins, num_iterations) = match mode {
             RtsMode::Patch => (corr_dumps_per_cadence_patch, num_integration_bins_patch, 1),
-            RtsMode::Peel => (corr_dumps_per_cadence_peel, num_integration_bins_peel, 14),
+            RtsMode::Peel { .. } => (corr_dumps_per_cadence_peel, num_integration_bins_peel, 14),
         };
         if let Some(nib) = common.num_integration_bins {
             num_integration_bins = nib;
@@ -219,19 +230,8 @@ impl Opts {
             subband_ids,
             num_primary_cals: common.num_primary_cals.unwrap_or(match &mode {
                 RtsMode::Patch => 1,
-                RtsMode::Peel => 5,
+                RtsMode::Peel { .. } => 5,
             }),
-            num_cals: common.num_cals,
-            num_peel: match &self {
-                Self::Patch { .. } => None,
-                Self::Peel { num_peel, .. } => {
-                    if num_peel.is_none() {
-                        Some(common.num_cals)
-                    } else {
-                        *num_peel
-                    }
-                }
-            },
             do_rfi_flagging: common.rfi_flagging,
             corr_dumps_per_cadence,
             num_integration_bins,

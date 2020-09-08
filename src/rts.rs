@@ -16,7 +16,12 @@ lazy_static! {
 #[derive(Clone, Copy, Debug)]
 pub enum RtsMode {
     Patch,
-    Peel,
+    Peel {
+        /// The number of ionospheric calibrators.
+        num_cals: u32,
+        /// The number of calibrators to peel.
+        num_peel: u32,
+    },
 }
 
 #[derive(Debug)]
@@ -53,10 +58,6 @@ pub struct RtsParams {
     pub subband_ids: Vec<u8>,
     /// The number of primary calibrators to use (NumberOfCalibrators)
     pub num_primary_cals: u32,
-    /// The number of ionospheric calibrators.
-    pub num_cals: u32,
-    /// The number of calibrators to peel.
-    pub num_peel: Option<u32>,
     pub do_rfi_flagging: bool,
     pub corr_dumps_per_cadence: u32,
     pub num_integration_bins: u32,
@@ -146,13 +147,13 @@ ImageOversampling=3
             time = Utc::now().format("%Y-%m-%d %H:%M:%S"),
             fscrunch = self.f_scrunch,
             subband_ids = self.subband_ids.iter().map(|x| format!("{}", x)).join(","),
-            generate_di_jones = match self.mode {
+            generate_di_jones = match &self.mode {
                 RtsMode::Patch => 1,
-                RtsMode::Peel => 0,
+                RtsMode::Peel { .. } => 0,
             },
-            use_stored_calibration = match self.mode {
+            use_stored_calibration = match &self.mode {
                 RtsMode::Patch => 0,
-                RtsMode::Peel => 1,
+                RtsMode::Peel { .. } => 1,
             },
             metafits = self.metafits.display(),
             base_dir = self.base_dir.display(),
@@ -172,16 +173,14 @@ ImageOversampling=3
                 .expect("Couldn't convert self.source_catalogue_file to string!"),
             num_primary_cals = self.num_primary_cals,
             // Peel-only options.
-            peel_only = match self.mode {
+            peel_only = match &self.mode {
                 RtsMode::Patch => "".to_string(),
-                RtsMode::Peel => format!(
+                RtsMode::Peel { num_cals, num_peel } => format!(
                     "UpdateCalibratorAmplitudes=1\n\
                      NumberOfIonoCalibrators={}\n\
                      NumberOfSourcesToPeel={}\n\
                      writeVisToUVFITS=1\n",
-                    self.num_cals,
-                    self.num_peel
-                        .expect("num_peel: This should be unreachable!")
+                    num_cals, num_peel
                 ),
             },
         )
