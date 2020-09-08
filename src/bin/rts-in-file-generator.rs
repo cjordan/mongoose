@@ -63,6 +63,12 @@ struct Common {
     #[structopt(short, long)]
     num_cals: u32,
 
+    /// The number of integration bins to use. By default, this is determined by
+    /// whether we're patching or peeling and the integration time of the
+    /// observation.
+    #[structopt(long)]
+    num_integration_bins: Option<u32>,
+
     /// Use available cotter flags in mwaf file (doRFIflagging).
     #[structopt(short, long)]
     rfi_flagging: bool,
@@ -133,10 +139,13 @@ impl Opts {
             }
         };
 
-        let (corr_dumps_per_cadence, num_integration_bins, num_iterations) = match mode {
+        let (corr_dumps_per_cadence, mut num_integration_bins, num_iterations) = match mode {
             RtsMode::Patch => (corr_dumps_per_cadence_patch, num_integration_bins_patch, 1),
             RtsMode::Peel => (corr_dumps_per_cadence_peel, num_integration_bins_peel, 14),
         };
+        if let Some(nib) = common.num_integration_bins {
+            num_integration_bins = nib;
+        }
 
         let num_fine_channels = match context.fine_channel_width_hz {
             40000 => 32,
