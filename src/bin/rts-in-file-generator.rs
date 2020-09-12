@@ -74,8 +74,8 @@ struct Common {
     rfi_flagging: bool,
 
     /// Specify a sequence of integers corresponding to the coarse bands used
-    /// (e.g. 1,2,3). Default is CHANSEL in the metafits file (but starting from
-    /// 1, not 0).
+    /// (e.g. --subband-ids 1 2 3). Default is CHANSEL in the metafits file (but
+    /// starting from 1, not 0).
     #[structopt(short = "S", long)]
     subband_ids: Option<Vec<u8>>,
 
