@@ -9,7 +9,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::exit;
 
-use mwalib::*;
+use mwalib::mwalibContext;
 use structopt::StructOpt;
 
 use mongoose::rts::*;
@@ -113,10 +113,7 @@ impl Opts {
         // Ideally, mwalib gets information from the gpubox files in addition to
         // the metafits file. But, we're not using any time information here, so
         // there's no need to handle gpubox files.
-        let context = mwalib::mwalibContext::new(&common.metafits, &[]).unwrap();
-
-        let mut metafits = fits_open!(&common.metafits).unwrap();
-        let hdu = fits_open_hdu!(&mut metafits, 0).unwrap();
+        let context = mwalibContext::new(&common.metafits, &[]).unwrap();
 
         let mode = match &self {
             Self::Patch { .. } => RtsMode::Patch,
@@ -173,11 +170,7 @@ impl Opts {
 
         // The magical base frequency is equal to:
         // (centre_freq - coarse_channel_bandwidth/2 - fine_channel_bandwidth/2)
-        let freqcent_hz: u32 = {
-            let f_mhz: f64 = get_required_fits_key!(&mut metafits, &hdu, "FREQCENT").unwrap();
-            (f_mhz * 1e6).round() as _
-        };
-        let base_freq = (freqcent_hz
+        let base_freq = (context.metafits_centre_freq_hz
             - context.observation_bandwidth_hz / 2
             - context.fine_channel_width_hz / 2) as f64
             / 1e6;
@@ -203,15 +196,11 @@ impl Opts {
 
         let subband_ids = match &common.subband_ids {
             Some(s) => s.clone(),
-            None => {
-                let chansel: String =
-                    get_required_fits_key!(&mut metafits, &hdu, "CHANSEL").unwrap();
-                chansel
-                    .replace(&['\'', '&'][..], "")
-                    .split(',')
-                    .map(|s| s.parse::<u8>().unwrap() + 1)
-                    .collect()
-            }
+            None => context
+                .coarse_channels
+                .iter()
+                .map(|cc| cc.gpubox_number as _)
+                .collect(),
         };
 
         RtsParams {
