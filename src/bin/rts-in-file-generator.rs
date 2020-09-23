@@ -7,12 +7,21 @@
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::exit;
 
+use anyhow::{bail, ensure};
 use mwalib::mwalibContext;
 use structopt::StructOpt;
 
 use mongoose::rts::*;
+
+#[derive(Debug, Default)]
+struct Timing {
+    corr_dump_time: f64,
+    corr_dumps_per_cadence_patch: u32,
+    num_integration_bins_patch: u32,
+    corr_dumps_per_cadence_peel: u32,
+    num_integration_bins_peel: u32,
+}
 
 /// Generate a .in file suitable for RTS usage
 #[derive(StructOpt, Debug)]
@@ -25,6 +34,16 @@ enum Opts {
     Patch {
         #[structopt(flatten)]
         common: Common,
+
+        /// The number of "primary calibrators" to use (NumberOfCalibrators).
+        /// This should always be 1 for a patch.
+        #[structopt(long, default_value = "1")]
+        num_primary_cals: u32,
+
+        /// Specify the number of times to run the CML loop (NumberOfIterations).
+        /// This should be 1 for a patch.
+        #[structopt(long, default_value = "1")]
+        num_iterations: u32,
     },
 
     /// Run the RTS in "peel" mode (direction-dependent calibration)
@@ -32,17 +51,25 @@ enum Opts {
     /// The base directory is expected to contain files from only a single
     /// observation, and have mwaf files that have been "re-flagged".
     Peel {
-        /// The number of source calibrators to use.
-        #[structopt(short, long)]
+        #[structopt(flatten)]
+        common: Common,
+
+        /// The number of source calibrators to use (NumberOfIonoCalibrators).
+        #[structopt(short, long, default_value = "1000")]
         num_cals: u32,
 
-        /// The number of sources to peel. If not specified, defaults to
-        /// num_cals.
+        /// The number of sources to peel (NumberOfSourcesToPeel). If not
+        /// specified, defaults to num_cals.
         #[structopt(long)]
         num_peel: Option<u32>,
 
-        #[structopt(flatten)]
-        common: Common,
+        /// The number of "primary calibrators" to use (NumberOfCalibrators).
+        #[structopt(long, default_value = "5")]
+        num_primary_cals: u32,
+
+        /// Specify the number of times to run the CML loop (NumberOfIterations).
+        #[structopt(long, default_value = "14")]
+        num_iterations: u32,
     },
 }
 
@@ -50,70 +77,156 @@ enum Opts {
 /// jobs.
 #[derive(StructOpt, Debug)]
 struct Common {
-    /// The directory containing gpubox files and cotter mwaf files (formatted
-    /// RTS_<obsid>_xy.mwaf).
-    #[structopt(short, long, parse(from_os_str))]
+    // File related.
+    /// The directory containing input data, including gpubox files and cotter
+    /// mwaf files (formatted RTS_<obsid>_xy.mwaf).
+    #[structopt(short, long, parse(from_str))]
     base_dir: PathBuf,
 
-    /// The path to the obsid's metafits file.
-    #[structopt(short, long, parse(from_os_str))]
-    metafits: PathBuf,
+    /// The base of the input filenames (BaseFilename). By default, this is
+    /// "*_gpubox" to match present gpubox files.
+    #[structopt(long, default_value = "*_gpubox")]
+    base_filename: String,
 
-    /// The path to the source list file.
-    #[structopt(short, long, parse(from_os_str))]
+    /// The path to the obsid's metafits file. If this isn't supplied, then many
+    /// other variables must be supplied.
+    #[structopt(short, long, parse(from_str))]
+    metafits: Option<PathBuf>,
+
+    /// The path to the source-list sky-model file.
+    #[structopt(short, long, parse(from_str))]
     srclist: PathBuf,
 
-    /// The number of integration bins to use. By default, this is determined by
-    /// whether we're patching or peeling and the integration time of the
-    /// observation.
+    /// Don't use cotter flags in mwaf files (ImportCotterFlags). Default is to
+    /// use flags.
+    #[structopt(long)]
+    no_cotter_flags: bool,
+
+    /// Run the RTS's CheckForRFI routine (doRFIflagging).
+    #[structopt(long)]
+    rts_rfi_flagging: bool,
+
+    /// Add a node number (01 to 24) to the base filename
+    /// (AddNodeNumberToFilename). Used primarily (?) with input uvfits files.
+    #[structopt(long)]
+    add_node_number: bool,
+
+    /// Don't correct visibilities for cable delays and PFB gains
+    /// (doMWArxCorrections)
+    #[structopt(long)]
+    dont_rx_correct: bool,
+
+    /// Don't apply cable corrections and digital gains based on metafits
+    /// (doRawDataCorrections)
+    #[structopt(long)]
+    dont_correct_raw_data: bool,
+
+    /// Don't read visibilities directly from gpubox files written by correlator
+    /// (ReadGpuboxDirect)
+    #[structopt(long)]
+    dont_read_gpubox_direct: bool,
+
+    /// When reading from uvfits, don't use a single file per coarse band
+    /// (ReadAllFromSingleFile)
+    #[structopt(long)]
+    dont_read_all_from_single_file: bool,
+
+    /// The path to the FEE beam HDF5 file. Specifying this means the RTS will
+    /// use the FEE beam instead of the old analytic beam.
+    #[structopt(short, long)]
+    fee_beam_file: Option<PathBuf>,
+
+    // Observation related.
+    /// The observation ID.
+    #[structopt(long)]
+    obsid: Option<u32>,
+
+    /// Specify the time resolution of the input data in seconds (CorrDumpTime).
+    /// The default is determined by the metafits file.
+    #[structopt(long)]
+    corr_dump_time: Option<f64>,
+
+    /// Number of correlator dumps to be included in each calibration interval
+    /// (CorrDumpsPerCadence).
+    #[structopt(long)]
+    corr_dumps_per_cadence: Option<u32>,
+
+    /// The number of integration bins to use in baseline averaging
+    /// (NumberOfIntegrationBins). By default, this is determined by whether
+    /// we're patching or peeling and the integration time of the observation.
+    ///
+    /// The bins are set according to powers of two, so if
+    /// CorrDumpsPerCadence=32, and NumberOfIntegrationBins=5, then the bins
+    /// will have 32,16,8,4,2 visibilities.
     #[structopt(long)]
     num_integration_bins: Option<u32>,
 
-    /// Use available cotter flags in mwaf file (doRFIflagging).
-    #[structopt(short, long)]
-    rfi_flagging: bool,
+    /// Specify the base frequency in MHz (ObservationFrequencyBase). This is
+    /// calculated by: obs_centre_freq - obs_bandwidth / 2 - fine_chan_width / 2
+    #[structopt(long)]
+    base_freq: Option<f64>,
+
+    /// Specify the number of fine channels per coarse band (NumberOfChannels).
+    #[structopt(long)]
+    num_fine_chans: Option<u32>,
+
+    /// Specify the fine channel bandwidth in MHz (ChannelBandwidth).
+    #[structopt(long)]
+    fine_chan_width: Option<f64>,
 
     /// Specify a sequence of integers corresponding to the coarse bands used
-    /// (e.g. --subband-ids 1 2 3). Default is CHANSEL in the metafits file (but
-    /// starting from 1, not 0).
+    /// (e.g. --subband-ids 1 2 3) (SubBandIDs). Default is CHANSEL in the
+    /// metafits file (but starting from 1, not 0).
     #[structopt(short = "S", long)]
     subband_ids: Option<Vec<u8>>,
 
-    /// Use this to force the RA phase centre [degrees] (e.g. 10.3333).
+    /// Use this to force the RA phase centre [degrees] (e.g. 10.3333)
+    /// (ObservationImageCentreRA).
     #[structopt(long)]
     force_ra: Option<f64>,
 
-    /// Use this to force the Dec phase centre [degrees] (e.g. -27.0).
+    /// Use this to force the Dec phase centre [degrees] (e.g. -27.0)
+    /// (ObservationImageCentreDec).
     #[structopt(long)]
     force_dec: Option<f64>,
 
     /// The number of channels to average during calibration (FscrunchChan).
-    /// Default is 2.
-    #[structopt(long)]
-    fscrunch: Option<u8>,
+    #[structopt(long, default_value = "2")]
+    fscrunch: u8,
 
-    /// The number of "primary calibrators" to use. This should always be 1 for
-    /// a patch. The default is 5 for a peel.
-    #[structopt(long)]
-    num_primary_cals: Option<u32>,
-
-    /// Save the .in file to a specified location. If not specified, the .in
-    /// file contents are printed to stdout.
+    /// Save the output of this program to a specified location. If not
+    /// specified, the .in file contents are printed to stdout.
     #[structopt(short, long)]
     output_file: Option<PathBuf>,
 }
 
 impl Opts {
-    fn rts_params(self) -> RtsParams {
+    fn rts_params(self) -> Result<RtsParams, anyhow::Error> {
         let common = match &self {
-            Self::Patch { common } => common,
+            Self::Patch { common, .. } => common,
             Self::Peel { common, .. } => common,
         };
 
-        // Ideally, mwalib gets information from the gpubox files in addition to
-        // the metafits file. But, we're not using any time information here, so
-        // there's no need to handle gpubox files.
-        let context = mwalibContext::new(&common.metafits, &[]).unwrap();
+        // mwalib gets accurate time information from the gpubox files in
+        // addition to the metafits file (like what the true start time should
+        // be, given that not all gpubox files start at the same time). But,
+        // we're not using any time information here, so there's no need to
+        // handle gpubox files.
+        let context = if let Some(m) = &common.metafits {
+            Some(mwalibContext::new(&m, &[])?)
+        } else {
+            None
+        };
+
+        let obsid = match common.obsid {
+            Some(o) => o,
+            None => match &context.as_ref().map(|c| c.obsid) {
+                Some(o) => *o,
+                None => {
+                    bail!("Neither --obsid nor --metafits were specified; cannot get the obsid.")
+                }
+            },
+        };
 
         let mode = match &self {
             Self::Patch { .. } => RtsMode::Patch,
@@ -131,145 +244,245 @@ impl Opts {
             },
         };
 
-        let (
-            time_resolution,
-            corr_dumps_per_cadence_patch,
-            num_integration_bins_patch,
-            corr_dumps_per_cadence_peel,
-            num_integration_bins_peel,
-        ) = match context.integration_time_milliseconds {
-            500 => (0.5, 128, 7, 16, 5),
-            1000 => (1.0, 64, 7, 8, 3),
-            2000 => (2.0, 32, 6, 4, 3),
-            v => {
-                eprintln!("Unhandled integration time: {}s", v as f64 / 1e3);
-                exit(1)
-            }
+        // Set up the timing stuff. Fill things automatically first, if
+        // possible, then overwrite settings with anything user-specified.
+        let mut timing: Timing = match &context.as_ref().map(|c| c.integration_time_milliseconds) {
+            Some(500) => Timing {
+                corr_dump_time: 0.5,
+                corr_dumps_per_cadence_patch: 128,
+                num_integration_bins_patch: 7,
+                corr_dumps_per_cadence_peel: 16,
+                num_integration_bins_peel: 5,
+            },
+            Some(1000) => Timing {
+                corr_dump_time: 1.0,
+                corr_dumps_per_cadence_patch: 64,
+                num_integration_bins_patch: 7,
+                corr_dumps_per_cadence_peel: 8,
+                num_integration_bins_peel: 3,
+            },
+            Some(2000) => Timing {
+                corr_dump_time: 2.0,
+                corr_dumps_per_cadence_patch: 32,
+                num_integration_bins_patch: 6,
+                corr_dumps_per_cadence_peel: 4,
+                num_integration_bins_peel: 3,
+            },
+            _ => Timing::default(),
         };
-
-        let (corr_dumps_per_cadence, mut num_integration_bins, num_iterations) = match mode {
-            RtsMode::Patch => (corr_dumps_per_cadence_patch, num_integration_bins_patch, 1),
-            RtsMode::Peel { .. } => (corr_dumps_per_cadence_peel, num_integration_bins_peel, 14),
-        };
-        if let Some(nib) = common.num_integration_bins {
-            num_integration_bins = nib;
+        if let Some(c) = common.corr_dump_time {
+            timing.corr_dump_time = c;
+        }
+        if let Some(c) = common.corr_dumps_per_cadence {
+            timing.corr_dumps_per_cadence_patch = c;
+            timing.corr_dumps_per_cadence_peel = c;
+        }
+        if let Some(c) = common.num_integration_bins {
+            timing.num_integration_bins_patch = c;
+            timing.num_integration_bins_peel = c;
         }
 
-        let num_fine_channels = match context.fine_channel_width_hz {
-            40000 => 32,
-            20000 => 64,
-            10000 => 128,
-            v => {
-                eprintln!(
-                    "Unhandled number of channels for fine-channel bandwidth {}kHz!",
-                    v as f64 / 1e3
-                );
-                exit(1)
+        // Check that all `timing` fields are non zero.
+        if timing.corr_dump_time == 0.0
+            || timing.corr_dumps_per_cadence_patch == 0
+            || timing.corr_dumps_per_cadence_peel == 0
+            || timing.num_integration_bins_patch == 0
+            || timing.num_integration_bins_peel == 0
+        {
+            bail!("At least one of the timing fields was zero:\n{:?}\n\nIf you didn't specify any, it's possible that mongoose does not currently handle this integration time{}", timing, match context {
+                Some(c) => format!(" ({}s)", c.integration_time_milliseconds as f64 / 1e3),
+                None => "".to_string(),
+            })
+        }
+
+        let (corr_dump_time, corr_dumps_per_cadence, num_integration_bins) = match mode {
+            RtsMode::Patch => (
+                timing.corr_dump_time,
+                timing.corr_dumps_per_cadence_patch,
+                timing.num_integration_bins_patch,
+            ),
+            RtsMode::Peel { .. } => (
+                timing.corr_dump_time,
+                timing.corr_dumps_per_cadence_peel,
+                timing.num_integration_bins_peel,
+            ),
+        };
+
+        let num_fine_channels = if let Some(n) = common.num_fine_chans {
+            n
+        } else {
+            ensure!(context.is_some(), "Neither --num-fine-chans nor --metafits were specified; cannot get the number of fine channels.");
+            let c = context.as_ref().unwrap();
+            match c.fine_channel_width_hz {
+                40000 => 32,  // 40 kHz
+                20000 => 64,  // 20 kHz
+                10000 => 128, // 10 kHz
+                v => {
+                    bail!(
+                        "Unhandled number of channels for fine-channel bandwidth {}kHz!",
+                        v as f64 / 1e3
+                    );
+                }
             }
+        };
+
+        // Could merge this with the block above, but that would be more effort
+        // than I'm willing to expend right now.
+        let fine_channel_width_mhz = if let Some(n) = common.fine_chan_width {
+            n
+        } else {
+            ensure!(context.is_some(), "Neither --fine-chan-width nor --metafits were specified; cannot get the fine channel width.");
+            let c = context.as_ref().unwrap();
+            c.fine_channel_width_hz as f64 / 1e6
         };
 
         // The magical base frequency is equal to:
         // (centre_freq - coarse_channel_bandwidth/2 - fine_channel_bandwidth/2)
-        let base_freq = (context.metafits_centre_freq_hz
-            - context.observation_bandwidth_hz / 2
-            - context.fine_channel_width_hz / 2) as f64
-            / 1e6;
+        let base_freq = if let Some(f) = common.base_freq {
+            f
+        } else {
+            ensure!(
+                context.is_some(),
+                "Neither --base-freq nor --metafits were specified; cannot get the base frequency."
+            );
+            let c = context.as_ref().unwrap();
+            (c.metafits_centre_freq_hz
+                - c.observation_bandwidth_hz / 2
+                - c.fine_channel_width_hz / 2) as f64
+                / 1e6
+        };
 
         // Use the forced value, if provided.
         let obs_image_centre_ra = match common.force_ra {
             Some(r) => r,
             // Use RAPHASE if it is available.
-            None => match context.ra_phase_center_degrees {
-                Some(v) => v,
-                // Otherwise, just use RA.
-                None => context.ra_tile_pointing_degrees,
-            },
+            None => {
+                ensure!(
+                    context.is_some(),
+                    "Neither --force-ra nor --metafits were specified; cannot get the RA pointing."
+                );
+                let c = context.as_ref().unwrap();
+                match c.ra_phase_center_degrees {
+                    Some(v) => v,
+                    // Otherwise, just use RA.
+                    None => c.ra_tile_pointing_degrees,
+                }
+            }
         } / 15.0;
 
         let obs_image_centre_dec = match common.force_dec {
             Some(r) => r,
-            None => match context.dec_phase_center_degrees {
-                Some(v) => v,
-                None => context.dec_tile_pointing_degrees,
-            },
+            None => {
+                ensure!(
+                    context.is_some(),
+                    "Neither --force-dec nor --metafits were specified; cannot get the Dec pointing."
+                );
+                let c = context.as_ref().unwrap();
+                match c.dec_phase_center_degrees {
+                    Some(v) => v,
+                    None => c.dec_tile_pointing_degrees,
+                }
+            }
         };
 
         let subband_ids = match &common.subband_ids {
             Some(s) => s.clone(),
-            None => context
-                .coarse_channels
-                .iter()
-                .map(|cc| cc.gpubox_number as _)
-                .collect(),
+            None => {
+                ensure!(
+                    context.is_some(),
+                    "Neither --subband-ids nor --metafits were specified; cannot get the subbands."
+                );
+                let c = context.as_ref().unwrap();
+                let mut cc: Vec<u8> = c
+                    .coarse_channels
+                    .iter()
+                    .map(|cc| cc.gpubox_number as _)
+                    .collect();
+                &mut cc.sort_unstable();
+                cc
+            }
         };
 
-        RtsParams {
+        Ok(RtsParams {
             mode,
             base_dir: common.base_dir.clone(),
+            base_filename: common.base_filename.clone(),
             metafits: common.metafits.clone(),
+            use_cotter_flags: !common.no_cotter_flags,
             source_catalogue_file: common.srclist.clone(),
-            obsid: context.obsid,
+            do_rfi_flagging: common.rts_rfi_flagging,
+            do_rx_corrections: !common.dont_rx_correct,
+            do_raw_data_corrections: !common.dont_correct_raw_data,
+            read_gpubox_direct: !common.dont_read_gpubox_direct,
+            read_all_from_single_file: !common.dont_read_all_from_single_file,
+            add_node_number_to_filename: common.add_node_number,
+            fee_beam_file: common.fee_beam_file.clone(),
+            obsid,
             obs_image_centre_ra,
             obs_image_centre_dec,
-            time_resolution,
-            fine_channel_width_mhz: context.fine_channel_width_hz as f64 / 1e6,
-            num_fine_channels,
-            f_scrunch: common.fscrunch.unwrap_or(2),
-            base_freq,
-            subband_ids,
-            num_primary_cals: common.num_primary_cals.unwrap_or(match &mode {
-                RtsMode::Patch => 1,
-                RtsMode::Peel { .. } => 5,
-            }),
-            do_rfi_flagging: common.rfi_flagging,
+            corr_dump_time,
             corr_dumps_per_cadence,
             num_integration_bins,
-            num_iterations,
-        }
+            num_iterations: match self {
+                Opts::Patch { num_iterations, .. } => num_iterations,
+                Opts::Peel { num_iterations, .. } => num_iterations,
+            },
+            fine_channel_width_mhz,
+            num_fine_channels,
+            f_scrunch: common.fscrunch,
+            base_freq,
+            subband_ids,
+            num_primary_cals: match &self {
+                Opts::Patch {
+                    num_primary_cals, ..
+                } => *num_primary_cals,
+                Opts::Peel {
+                    num_primary_cals, ..
+                } => *num_primary_cals,
+            },
+        })
     }
 }
 
 fn main() -> Result<(), anyhow::Error> {
     let mut opts = Opts::from_args();
     let mut common = match &mut opts {
-        Opts::Patch { common } => common,
+        Opts::Patch { common, .. } => common,
         Opts::Peel { common, .. } => common,
     };
 
     // Sanity checks.
     // Test that the base directory exists, and make the path absolute.
-    common.base_dir = common.base_dir.canonicalize().unwrap_or_else(|_| {
-        eprintln!(
-            "Specified base directory ({:?}) does not exist!",
-            common.base_dir
-        );
-        exit(1)
-    });
+    common.base_dir = match common.base_dir.canonicalize() {
+        Ok(d) => d,
+        Err(_) => bail!(
+            "Specified base directory ({}) does not exist!",
+            common.base_dir.display()
+        ),
+    };
 
     // Test that the metafits file exists.
-    if !common.metafits.exists() {
-        eprintln!(
+    if let Some(m) = &common.metafits {
+        ensure!(
+            m.exists(),
             "Specified metafits file ({:?}) does not exist!",
             common.metafits
         );
-        exit(1)
     }
 
     // Test that the srclist file exists.
-    if !common.srclist.exists() {
-        eprintln!(
-            "Specified source list file ({:?}) does not exist!",
-            common.srclist
-        );
-        exit(1)
-    };
+    ensure!(
+        common.srclist.exists(),
+        "Specified source list file ({:?}) does not exist!",
+        common.srclist
+    );
 
     match &common.output_file {
         Some(f) => {
             let mut file = File::create(&f)?;
-            write!(&mut file, "{}", opts.rts_params())?;
+            write!(&mut file, "{}", opts.rts_params()?)?;
         }
-        None => print!("{}", opts.rts_params()),
+        None => print!("{}", opts.rts_params()?),
     }
 
     Ok(())

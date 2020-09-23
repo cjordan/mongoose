@@ -28,40 +28,90 @@ pub enum RtsMode {
 pub struct RtsParams {
     /// The type of RTS processing we're doing.
     pub mode: RtsMode,
+
+    // File related.
     /// The directory where the observation's gpubox files are.
     pub base_dir: PathBuf,
+
+    /// The directory where the observation's gpubox files are.
+    pub base_filename: String,
+
     /// The metafits file associated with the observation.
-    pub metafits: PathBuf,
+    pub metafits: Option<PathBuf>,
+
+    /// Are we using the mwaf files?
+    pub use_cotter_flags: bool,
+
     /// Path to the sky model source list.
     pub source_catalogue_file: PathBuf,
+
+    /// doRFIflagging
+    pub do_rfi_flagging: bool,
+
+    /// doMWArxCorrections
+    pub do_rx_corrections: bool,
+
+    /// doRawDataCorrections
+    pub do_raw_data_corrections: bool,
+
+    /// ReadGpuboxDirect
+    pub read_gpubox_direct: bool,
+
+    /// ReadAllFromSingleFile
+    pub read_all_from_single_file: bool,
+
+    /// AddNodeNumberToFilename
+    pub add_node_number_to_filename: bool,
+
+    /// The path to the FEE beam HDF5 file. If it's not specified, assume we're
+    /// using the analytic beam.
+    pub fee_beam_file: Option<PathBuf>,
+
+    // Observation related.
     /// The observation ID. Should have 10 digits.
     pub obsid: u32,
+
+    /// ObservationImageCentreRA
     pub obs_image_centre_ra: f64,
+
+    /// ObservationImageCentreDec
     pub obs_image_centre_dec: f64,
-    /// Output time resolution, or the cadence at which data is dumped
-    /// [seconds]. CorrDumpTime in the RTS.
-    pub time_resolution: f64,
+
+    /// Output time resolution, or the cadence at which data is dumped [seconds]
+    /// (CorrDumpTime)
+    pub corr_dump_time: f64,
+
+    /// CorrDumpsPerCadence
+    pub corr_dumps_per_cadence: u32,
+
+    /// NumberOfIntegrationBins
+    pub num_integration_bins: u32,
+
+    /// The number of times to run the CML loop.
+    pub num_iterations: u32,
+
     /// Fine channel resolution [MHz]
     pub fine_channel_width_mhz: f64,
+
     /// The number of fine channels per coarse-band channel.
     pub num_fine_channels: u32,
+
     /// The number of fine frequency channels to average together during
     /// processing (FscrunchChan)
     pub f_scrunch: u8,
+
     /// The magic freq. calculated with:
     ///
     /// centre_freq - coarse_channel_bandwidth/2 - fine_channel_bandwidth/2
     ///
     /// (ObservationFrequencyBase)
     pub base_freq: f64,
+
     /// Which coarse-band channels to use during RTS processing (SubBandIDs)
     pub subband_ids: Vec<u8>,
+
     /// The number of primary calibrators to use (NumberOfCalibrators)
     pub num_primary_cals: u32,
-    pub do_rfi_flagging: bool,
-    pub corr_dumps_per_cadence: u32,
-    pub num_integration_bins: u32,
-    pub num_iterations: u32,
 }
 
 impl std::fmt::Display for RtsParams {
@@ -78,22 +128,24 @@ SubBandIDs={subband_ids}
 
 StartProcessingAt=0
 
-StorePixelMatrices=0
-
+DoCalibration=1
 generateDIjones={generate_di_jones}
 useStoredCalibrationFiles={use_stored_calibration}
-
 applyDIcalibration=1
-doMWArxCorrections=1
 
-ReadMetafitsFile=1
-MetafitsFilename={metafits}
-BaseFilename={base_dir}/*_gpubox
-ImportCotterFlags=1
-ImportCotterBasename={base_dir}/RTS_{obsid}
-
+BaseFilename={base_dir}/{base_filename}
+{metafits}
+{cotter}
 doRFIflagging={rfi}
-useFastPrimaryBeamModels=1
+doMWArxCorrections={do_rx_corrections}
+doRawDataCorrections={do_raw_data_corrections}
+ReadGpuboxDirect={read_gpubox_direct}
+ReadAllFromSingleFile={read_all_from_single_file}
+AddNodeNumberToFilename={add_node_number_to_filename}
+UsePacketInput=0
+UseThreadedVI=0
+
+{beam}
 
 CorrDumpTime={time_res}
 CorrDumpsPerCadence={cdpc}
@@ -110,16 +162,9 @@ ObservationImageCentreDec={dec}
 // ObservationPointCentreHA=
 // ObservationPointCentreDec=
 
-DoCalibration=1
 SourceCatalogueFile={srclist}
 NumberOfCalibrators={num_primary_cals}
 {peel_only}
-ReadGpuboxDirect=1
-UsePacketInput=0
-UseThreadedVI=0
-doRawDataCorrections=1
-// Necessary?
-ReadAllFromSingleFile=
 
 // Magic follows.
 // MaxFrequency [MHz, float]: Used to set size of uv cells for gridding. Also
@@ -127,8 +172,7 @@ ReadAllFromSingleFile=
 // MHz.
 MaxFrequency=200
 
-// array_file.txt doesn't exist, but currently, the RTS will not
-// run without it!
+// array_file.txt doesn't exist, but currently, the RTS will not run without it!
 ArrayFile=array_file.txt
 ArrayNumberOfStations=128
 
@@ -139,8 +183,14 @@ ArrayPositionLong=116.67081524
 calBaselineMin=20.0
 calShortBaselineTaper=40.0
 
-// ImageOversampling [float]: Sets oversampling of imaging pixel. Default value is 3.
+// ImageOversampling [float]: Sets oversampling of imaging pixel. Default value
+// is 3.
 ImageOversampling=3
+
+// Store pixel beam weights along with intensity. Required if subsequently
+// integrating images using integrate_image utility. Images will be 4X greater
+// data volume.
+StorePixelMatrices=0
 "#,
             obsid = self.obsid,
             version = env!("CARGO_PKG_VERSION"),
@@ -155,10 +205,49 @@ ImageOversampling=3
                 RtsMode::Patch => 0,
                 RtsMode::Peel { .. } => 1,
             },
-            metafits = self.metafits.display(),
+            metafits = match &self.metafits {
+                Some(m) => format!(
+                    "ReadMetafitsFile=1\n\
+                     MetafitsFilename={}",
+                    m.display()
+                ),
+                None => "ReadMetafitsFile=0".to_string(),
+            },
             base_dir = self.base_dir.display(),
+            base_filename = self.base_filename,
+            cotter = if self.use_cotter_flags {
+                format!(
+                    "ImportCotterFlags=1\n\
+                     ImportCotterBasename={}/RTS_{}",
+                    self.base_dir.display(),
+                    self.obsid
+                )
+            } else {
+                "ImportCotterFlags=0".to_string()
+            },
             rfi = if self.do_rfi_flagging { 1 } else { 0 },
-            time_res = self.time_resolution,
+            do_rx_corrections = if self.do_rx_corrections { 1 } else { 0 },
+            do_raw_data_corrections = if self.do_raw_data_corrections { 1 } else { 0 },
+            read_gpubox_direct = if self.read_gpubox_direct { 1 } else { 0 },
+            read_all_from_single_file = if self.read_all_from_single_file { 1 } else { 0 },
+            add_node_number_to_filename = if self.add_node_number_to_filename {
+                1
+            } else {
+                0
+            },
+            beam = if let Some(f) = &self.fee_beam_file {
+                format!(
+                    "// FEE beam\n\
+                     TileBeamType=1\n\
+                     hdf5Filename={}",
+                    f.display()
+                )
+            } else {
+                "// Analytic beam\n\
+                 useFastPrimaryBeamModels=1"
+                    .to_string()
+            },
+            time_res = self.corr_dump_time,
             cdpc = self.corr_dumps_per_cadence,
             num_int_bins = self.num_integration_bins,
             num_ints = self.num_iterations,
@@ -179,7 +268,7 @@ ImageOversampling=3
                     "UpdateCalibratorAmplitudes=1\n\
                      NumberOfIonoCalibrators={}\n\
                      NumberOfSourcesToPeel={}\n\
-                     writeVisToUVFITS=1\n",
+                     writeVisToUVFITS=1",
                     num_cals, num_peel
                 ),
             },
