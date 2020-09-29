@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::process::exit;
-
+use anyhow::bail;
 use structopt::StructOpt;
 
 use mongoose::cotter::Occupancy;
@@ -24,11 +23,9 @@ fn main() -> Result<(), anyhow::Error> {
     let opts = Opts::from_args();
     // Ensure that the threshold is sensible.
     if opts.threshold == 0.0 {
-        eprintln!("Not running with a threshold of 0.");
-        exit(1)
+        bail!("Not running with a threshold of 0.");
     } else if opts.threshold > 1.0 {
-        eprintln!("The threshold cannot be bigger than 1.");
-        exit(1)
+        bail!("The threshold cannot be bigger than 1.");
     }
 
     // Get all of the mwaf files.
@@ -46,8 +43,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     // Fail if there are no mwaf files.
     if mwaf_files.is_empty() {
-        eprintln!("No files found matching: ./1?????????_??.mwaf");
-        exit(1)
+        bail!("No files found matching: ./1?????????_??.mwaf");
     }
 
     // "Reflag" the mwaf file in a new file with "RTS_" as a prefix.
