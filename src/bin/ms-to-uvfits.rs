@@ -27,11 +27,20 @@ struct Opts {
     #[structopt(name = "MEASUREMENT_SET", parse(from_str))]
     ms: PathBuf,
 
+    /// Force this program to convert the input ms into a single uvfits file.
+    /// The default is to make a uvfits file for each coarse band specified in
+    /// the MWA_SUBBAND table.
+    #[structopt(long)]
+    one_to_one: bool,
+
     /// The stem of the uvfits files to be written, e.g. "/tmp/rts" will
     /// generate files named "/tmp/rts_band01.uvfits", "/tmp/rts_band02.uvfits",
     /// etc.
-    #[structopt(short, long, parse(from_str))]
-    output: PathBuf,
+    ///
+    /// If --one-to-one is specified, then this argument is the whole path to
+    /// the output uvfits file (e.g. 1098108248.uvfits)
+    #[structopt(short, long)]
+    output: String,
 
     /// The name of the column containing the visibilities. This column should
     /// be in the main table of the measurement set.
@@ -62,9 +71,14 @@ fn main() -> Result<(), anyhow::Error> {
         (ms.n_rows(), casacore_utc_to_epoch(utc))
     };
 
-    // Get the coarse bands used in this MWA observation by looking at the
-    // "MWA_SUBBAND" subtable. These start from 0.
-    let coarse_bands: Vec<u32> = {
+    // `coarse_bands` contains MWA coarse band numbers, probably between 1 and
+    // 24.
+    let coarse_bands: Vec<u32> = if opts.one_to_one {
+        vec![1]
+    } else {
+        // Get the coarse bands used in this MWA observation by looking at
+        // the "MWA_SUBBAND" subtable. These start from 0, and we add 1 to
+        // them.
         let mut t = Table::open(
             &format!("{}/MWA_SUBBAND", &opts.ms.display()),
             TableOpenMode::Read,
@@ -73,7 +87,7 @@ fn main() -> Result<(), anyhow::Error> {
         let coarse_bands_signed: Vec<i32> = t.get_col_as_vec("NUMBER").unwrap();
         let coarse_bands_unsigned: Result<Vec<_>, _> = coarse_bands_signed
             .into_iter()
-            .map(|b| b.try_into())
+            .map(|b| (b + 1).try_into())
             .collect();
         coarse_bands_unsigned?
     };
@@ -94,8 +108,8 @@ fn main() -> Result<(), anyhow::Error> {
 
         let _centre_coarse_band: i32 = t.get_cell("MWA_CENTRE_SUBBAND_NR", 0).unwrap();
         let fine_chan_freqs_hz: Vec<f64> = t.get_cell_as_vec("CHAN_FREQ", 0).unwrap();
-        // Not sure if `total_bandwidth` is the total bandwidth inside the
-        // measurement set or for the whole observation. Assuming the former.
+        // We assume that `total_bandwidth_hz` is the total bandwidth inside the
+        // measurement set, not the whole observation.
         let total_bandwidth_hz: f64 = t.get_cell("TOTAL_BANDWIDTH", 0).unwrap();
 
         (total_bandwidth_hz, fine_chan_freqs_hz)
@@ -124,10 +138,15 @@ fn main() -> Result<(), anyhow::Error> {
             let centre_chan = (coarse_chan_width_hz / fine_chan_width_hz / 2.0).round() as u32;
             // The RTS expects this frequency...
             let centre_freq = fine_chan_freqs_hz[0]
-                + band as f64 * coarse_chan_width_hz
-                + coarse_chan_width_hz / 2.0;
+                + (band - 1) as f64 * coarse_chan_width_hz
+                + coarse_chan_width_hz / 2.0
+                - fine_chan_width_hz / 2.0;
 
-            let filename = format!("{}_band{:02}.uvfits", &opts.output.display(), band + 1);
+            let filename = if opts.one_to_one {
+                (&opts.output).to_owned()
+            } else {
+                format!("{}_band{:02}.uvfits", &opts.output, band)
+            };
             // Because we're working in parallel, and FitsFile structs can't be sent
             // over threads, ignore the returned structs. We'll just return the
             // filenames.
@@ -320,7 +339,8 @@ fn main() -> Result<(), anyhow::Error> {
         for (band, mut u) in uvfits.iter_mut().enumerate() {
             let centre_freq = fine_chan_freqs_hz[0]
                 + band as f64 * coarse_chan_width_hz
-                + coarse_chan_width_hz / 2.0;
+                + coarse_chan_width_hz / 2.0
+                - fine_chan_width_hz / 2.0;
             write_uvfits_antenna_table(&mut u, &start_epoch, centre_freq, &names, pos.view())?;
         }
     }
