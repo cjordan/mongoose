@@ -143,9 +143,13 @@ struct Common {
     #[structopt(long)]
     dont_read_all_from_single_file: bool,
 
-    /// The path to the FEE beam HDF5 file. Specifying this means the RTS will
-    /// use the FEE beam instead of the old analytic beam.
-    #[structopt(short, long)]
+    /// Use the 2016 FEE beam (TileBeamType=1).
+    #[structopt(short = "f", long)]
+    pub use_fee_beam: bool,
+
+    /// The path to the FEE beam HDF5 file. If it's not specified, but
+    /// --use-fee-beam is, inspect the MWA_BEAM_FILE environment variable.
+    #[structopt(long)]
     fee_beam_file: Option<PathBuf>,
 
     // Observation related.
@@ -236,6 +240,21 @@ impl Opts {
         let common = match &self {
             Self::Patch { common, .. } => common,
             Self::Peel { common, .. } => common,
+        };
+
+        let fee_beam_file: Option<PathBuf> = if common.use_fee_beam {
+            match &common.fee_beam_file {
+                Some(f) => Some(f.clone()),
+                // Try to get the file from MWA_BEAM_FILE
+                None => match std::env::var("MWA_BEAM_FILE") {
+                    Ok(f) => Some(PathBuf::from(f)),
+                    Err(_) => bail!("--use-fee-beam was specified, but no --fee-beam-file was supplied, and couldn't access the MWA_BEAM_FILE variable."),
+                },
+            }
+        } else {
+            // We were told not to use the FEE beam, so there's no FEE beam
+            // file.
+            None
         };
 
         // mwalib gets accurate time information from the gpubox files in
@@ -467,7 +486,7 @@ impl Opts {
             read_gpubox_direct: !common.dont_read_gpubox_direct,
             read_all_from_single_file: !common.dont_read_all_from_single_file,
             add_node_number_to_filename: common.add_node_number,
-            fee_beam_file: common.fee_beam_file.clone(),
+            fee_beam_file,
             obsid,
             obs_image_centre_ra,
             obs_image_centre_dec,

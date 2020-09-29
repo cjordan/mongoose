@@ -75,8 +75,8 @@ pub struct RtsParams {
     /// filename. Used when reading uvfits.
     pub add_node_number_to_filename: bool,
 
-    /// The path to the FEE beam HDF5 file. If it's not specified, assume we're
-    /// using the analytic beam.
+    /// The path to the FEE beam HDF5 file (hdf5Filename). If it's not
+    /// specified, assume we're using the analytic beam.
     pub fee_beam_file: Option<PathBuf>,
 
     // Observation related.
