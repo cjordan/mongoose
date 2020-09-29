@@ -44,6 +44,11 @@ enum Opts {
         /// This should be 1 for a patch.
         #[structopt(long, default_value = "1")]
         num_iterations: u32,
+
+        /// Write the visibilities processed by the RTS to uvfits files
+        /// (writeVisToUVFITS).
+        #[structopt(long)]
+        write_vis_to_uvfits: bool,
     },
 
     /// Run the RTS in "peel" mode (direction-dependent calibration)
@@ -63,13 +68,20 @@ enum Opts {
         #[structopt(long)]
         num_peel: Option<u32>,
 
-        /// The number of "primary calibrators" to use (NumberOfCalibrators).
+        /// The number of "primary calibrators" to use (NumberOfCalibrators). If
+        /// this is bigger than num-cals, then it will be truncated to match
+        /// num-cals.
         #[structopt(long, default_value = "5")]
         num_primary_cals: u32,
 
         /// Specify the number of times to run the CML loop (NumberOfIterations).
         #[structopt(long, default_value = "14")]
         num_iterations: u32,
+
+        /// Don't write the visibilities processed by the RTS to uvfits files
+        /// (writeVisToUVFITS).
+        #[structopt(long)]
+        dont_write_vis_to_uvfits: bool,
     },
 }
 
@@ -83,8 +95,8 @@ struct Common {
     #[structopt(short, long, parse(from_str))]
     base_dir: PathBuf,
 
-    /// The base of the input filenames (BaseFilename). By default, this is
-    /// "*_gpubox" to match present gpubox files.
+    /// The base of the input filenames (BaseFilename). By default, this matches
+    /// gpubox files.
     #[structopt(long, default_value = "*_gpubox")]
     base_filename: String,
 
@@ -161,8 +173,9 @@ struct Common {
     #[structopt(long)]
     num_integration_bins: Option<u32>,
 
-    /// Specify the base frequency in MHz (ObservationFrequencyBase). This is
-    /// calculated by: obs_centre_freq - obs_bandwidth / 2 - fine_chan_width / 2
+    /// Frequency at middle of lowest fine channel in observation, in MHz
+    /// (ObservationFrequencyBase). This is calculated by: obs_centre_freq -
+    /// obs_bandwidth / 2 - fine_chan_width / 2
     #[structopt(long)]
     base_freq: Option<f64>,
 
@@ -180,19 +193,37 @@ struct Common {
     #[structopt(short = "S", long)]
     subband_ids: Option<Vec<u8>>,
 
-    /// Use this to force the RA phase centre [degrees] (e.g. 10.3333)
-    /// (ObservationImageCentreRA).
+    /// Use this to force the RA phase centre in degrees (e.g. 10.3333)
+    /// (ObservationImageCentreRA). Required if the metafits isn't given.
     #[structopt(long)]
     force_ra: Option<f64>,
 
-    /// Use this to force the Dec phase centre [degrees] (e.g. -27.0)
-    /// (ObservationImageCentreDec).
+    /// Use this to force the Dec phase centre in degrees (e.g. -27.0)
+    /// (ObservationImageCentreDec). Required if the metafits isn't given.
     #[structopt(long)]
     force_dec: Option<f64>,
+
+    /// The hour angle of the observation's pointing centre in decimal hours
+    /// (e.g. 23.5) (ObservationPointCentreHA). Required if the metafits isn't
+    /// given. Calculated with: LST - RA
+    #[structopt(long)]
+    ha_pointing_centre: Option<f64>,
+
+    /// The declination of the observation's pointing centre as an hour angle in
+    /// degrees (e.g. -27.0) (ObservationPointCentreDec). Required if the
+    /// metafits isn't given.
+    #[structopt(long)]
+    dec_pointing_centre: Option<f64>,
 
     /// The number of channels to average during calibration (FscrunchChan).
     #[structopt(long, default_value = "2")]
     fscrunch: u8,
+
+    /// By default, sourcelist vetoing removes sources from the sourcelist which
+    /// are predicted to fall very close to the null of one of the coarse bands.
+    /// Enabling this option turns vetoing off. (DisableSourcelistVetos)
+    #[structopt(long)]
+    disable_srclist_vetos: bool,
 
     /// Save the output of this program to a specified location. If not
     /// specified, the .in file contents are printed to stdout.
@@ -385,6 +416,26 @@ impl Opts {
             }
         };
 
+        let (obs_pointing_centre_ha, obs_pointing_centre_dec) = {
+            let common = match &self {
+                Opts::Patch { common, .. } => common,
+                Opts::Peel { common, .. } => common,
+            };
+            match (
+                &common.metafits,
+                common.ha_pointing_centre,
+                common.dec_pointing_centre,
+            ) {
+                // If we have a metafits, there's no need to populate these
+                // fields. The RTS will get them from the metafits file.
+                (Some(_), _, _) => (None, None),
+                (None, Some(ha), Some(dec)) => (Some(ha), Some(dec)),
+                // We need to bail if the pointing centre wasn't supplied when a
+                // metafits also wasn't supplied.
+                (None, _, _) => bail!("When not using a metafits file, both --ha-pointing-centre and --dec-pointing-centre must be specified.")
+            }
+        };
+
         let subband_ids = match &common.subband_ids {
             Some(s) => s.clone(),
             None => {
@@ -398,7 +449,7 @@ impl Opts {
                     .iter()
                     .map(|cc| cc.gpubox_number as _)
                     .collect();
-                &mut cc.sort_unstable();
+                cc.sort_unstable();
                 cc
             }
         };
@@ -420,12 +471,14 @@ impl Opts {
             obsid,
             obs_image_centre_ra,
             obs_image_centre_dec,
+            obs_pointing_centre_ha,
+            obs_pointing_centre_dec,
             corr_dump_time,
             corr_dumps_per_cadence,
             num_integration_bins,
-            num_iterations: match self {
-                Opts::Patch { num_iterations, .. } => num_iterations,
-                Opts::Peel { num_iterations, .. } => num_iterations,
+            num_iterations: match &self {
+                Opts::Patch { num_iterations, .. } => *num_iterations,
+                Opts::Peel { num_iterations, .. } => *num_iterations,
             },
             fine_channel_width_mhz,
             num_fine_channels,
@@ -437,8 +490,21 @@ impl Opts {
                     num_primary_cals, ..
                 } => *num_primary_cals,
                 Opts::Peel {
-                    num_primary_cals, ..
-                } => *num_primary_cals,
+                    num_cals,
+                    num_primary_cals,
+                    ..
+                } => *num_primary_cals.min(num_cals),
+            },
+            disable_srclist_vetos: common.disable_srclist_vetos,
+            write_vis_to_uvfits: match &self {
+                Opts::Patch {
+                    write_vis_to_uvfits,
+                    ..
+                } => *write_vis_to_uvfits,
+                Opts::Peel {
+                    dont_write_vis_to_uvfits,
+                    ..
+                } => !*dont_write_vis_to_uvfits,
             },
         })
     }
