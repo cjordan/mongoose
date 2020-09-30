@@ -321,6 +321,9 @@ pub fn write_uvfits_antenna_table(
     hdu.write_key(uvfits, "FREQID", -1)?; // Frequency setup number
     hdu.write_key(uvfits, "IATUTC", 33.0)?;
 
+    // Assume the station coordinates are "right handed".
+    hdu.write_key(uvfits, "XYZHAND", "RIGHT")?;
+
     let c_antenna_names = rust_strings_to_c_strings(antenna_names)?;
 
     // Write to the table row by row.
