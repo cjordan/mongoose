@@ -26,6 +26,10 @@ rts-in-file-generator peel \
                       -o rts_peel.in
 ```
 
+By default, the .in files will use available cotter flags. These must be the
+"RTS kind", with filenames like `RTS_1065880128_01.mwaf`. See the usage of
+reflag-mwaf-files to generate them.
+
 If you want to use the 2016 FEE beam, you should export the `MWA_BEAM_FILE`
 environment variable with a path to its HDF5 file, e.g.:
 
