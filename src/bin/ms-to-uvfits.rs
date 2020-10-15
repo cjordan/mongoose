@@ -4,6 +4,7 @@
 
 use std::collections::BTreeSet;
 use std::convert::TryInto;
+use std::f32::consts::TAU;
 use std::path::PathBuf;
 
 use anyhow::bail;
@@ -17,7 +18,7 @@ use structopt::StructOpt;
 
 use mongoose::fits::uvfits::*;
 use mongoose::ms::*;
-use mongoose::{S2PI, VELC};
+use mongoose::VELC;
 
 /// Convert an input measurement set to RTS-readable uvfits files.
 #[derive(StructOpt, Debug)]
@@ -215,9 +216,9 @@ fn main() -> Result<(), anyhow::Error> {
         ms.for_each_row(|row| {
             // Get the uvw coordinates.
             let uvw: Vec<f64> = row.get_cell("UVW").unwrap();
-            let u = (uvw[0] / *VELC) as f32;
-            let v = (uvw[1] / *VELC) as f32;
-            let w = (uvw[2] / *VELC) as f32;
+            let u = (uvw[0] / VELC) as f32;
+            let v = (uvw[1] / VELC) as f32;
+            let w = (uvw[2] / VELC) as f32;
 
             // Get the uvfits baseline. It is encoded as a float, because all
             // elements of a uvfits row must have the same type.
@@ -251,7 +252,7 @@ fn main() -> Result<(), anyhow::Error> {
                     // theorem (means that we don't need to do a real complex
                     // exponential).
                     for (i, mut vis_chan) in vis.outer_iter_mut().enumerate() {
-                        let (im, re) = (*S2PI * w * fine_chan_freqs_hz[i] as f32).sin_cos();
+                        let (im, re) = (TAU * w * fine_chan_freqs_hz[i] as f32).sin_cos();
                         vis_chan *= Complex32::new(re, im);
                     }
                 }

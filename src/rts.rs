@@ -6,12 +6,6 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 use itertools::Itertools;
-use lazy_static::lazy_static;
-use regex::Regex;
-
-lazy_static! {
-    static ref RE_GPUBOX_BAND: Regex = Regex::new(r"gpubox(0)?(?P<band>\d+)").unwrap();
-}
 
 #[derive(Clone, Copy, Debug)]
 pub enum RtsMode {
