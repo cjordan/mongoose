@@ -145,7 +145,7 @@ struct Common {
 
     /// Use the 2016 FEE beam (TileBeamType=1).
     #[structopt(short = "f", long)]
-    pub use_fee_beam: bool,
+    use_fee_beam: bool,
 
     /// The path to the FEE beam HDF5 file. If it's not specified, but
     /// --use-fee-beam is, inspect the MWA_BEAM_FILE environment variable.

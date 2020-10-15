@@ -73,7 +73,7 @@ module load mongoose
 
 # Will find one and only one metafits file in the parent directory.
 METAFITS=$(find .. -maxdepth 1 -name "*.metafits" -print -quit)
-[ $META ] && echo "No metafits file in current directory!" && exit 1
+[ $META ] && echo "No metafits file in parent directory!" && exit 1
 
 echo "Using ${METAFITS}"
 

@@ -72,7 +72,6 @@ pub fn new_uvfits(
 
     // Create a new fits file.
     let mut status = 0;
-    // let c_filename = std::ffi::CString::new(filename).unwrap();
     let c_filename = CString::new(filename)?;
     let mut fptr = std::ptr::null_mut();
     unsafe {
