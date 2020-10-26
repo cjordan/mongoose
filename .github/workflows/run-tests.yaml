@@ -1,5 +1,5 @@
 ---
-name: Run tests
+name: Tests
 
 # Do this on every push
 on: [push]
@@ -8,23 +8,34 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    runs-on: ubuntu-20.04
+  test:
+    name: Test ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # os: [ubuntu-latest, macos-latest] # Need ERFA installed in MacOS.
+        os: [ubuntu-latest]
     steps:
-    - uses: actions/checkout@v2
+    - name: Checkout sources
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
 
-    - name: Install dependencies
-      run: |
-          sudo apt update -y
-          DEBIAN_FRONTEND="noninteractive" sudo apt-get -y install tzdata
-          sudo apt install -y curl libcfitsio-dev liberfa-dev
+    - name: Install stable toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
 
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          . $HOME/.cargo/env
-          rustup update stable --no-self-update && rustup default stable
-          rustup target add x86_64-unknown-linux-gnu
+    - name: Install Cargo Make
+      uses: davidB/rust-cargo-make@v1
+
+    - name: Install Dependencies
+      run: cargo make install_deps
+
+    - name: Run cargo check, fmt, clippy
+      run: cargo make ci
 
     - name: Run tests
-      run: |
-        . $HOME/.cargo/env
-        cargo test
+      run: cargo test

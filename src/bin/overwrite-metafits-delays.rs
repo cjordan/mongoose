@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use anyhow::{bail, ensure};
 use fitsio::{errors::check_status as fits_check_status, FitsFile};
 use itertools::Itertools;
-use mwalib::mwalibContext;
+use mwalib::MetafitsContext;
 use structopt::{clap::AppSettings, StructOpt};
 
 /// MWA metafits files can list the delays of their tiles as all 32. This is
@@ -34,12 +34,12 @@ fn main() -> anyhow::Result<()> {
 
     let delays: Vec<u8> = match opts.delays {
         None => {
-            let context = mwalibContext::new(&opts.metafits, &[])?;
+            let context = MetafitsContext::new(&opts.metafits)?;
             // It's possible that a dipole is dead in the delays listed for a tile.
             // Iterate over all tiles until all values are non-32.
             let mut delays = vec![32; 16];
             for rf in context.rf_inputs {
-                for (i, &d) in rf.delays.iter().enumerate() {
+                for (i, &d) in rf.dipole_delays.iter().enumerate() {
                     if d != 32 {
                         delays[i] = match d.try_into() {
                             Ok(n) => n,

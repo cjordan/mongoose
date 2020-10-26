@@ -9,7 +9,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{bail, ensure};
-use mwalib::mwalibContext;
+use mwalib::MetafitsContext;
 use structopt::{clap::AppSettings, StructOpt};
 
 use mongoose::rts::*;
@@ -263,14 +263,14 @@ impl Opts {
         // we're not using any time information here, so there's no need to
         // handle gpubox files.
         let context = if let Some(m) = &common.metafits {
-            Some(mwalibContext::new(&m, &[])?)
+            Some(MetafitsContext::new(&m)?)
         } else {
             None
         };
 
         let obsid = match common.obsid {
             Some(o) => o,
-            None => match &context.as_ref().map(|c| c.obsid) {
+            None => match &context.as_ref().map(|c| c.obs_id) {
                 Some(o) => *o,
                 None => {
                     bail!("Neither --obsid nor --metafits were specified; cannot get the obsid.")
@@ -296,7 +296,7 @@ impl Opts {
 
         // Set up the timing stuff. Fill things automatically first, if
         // possible, then overwrite settings with anything user-specified.
-        let mut timing: Timing = match &context.as_ref().map(|c| c.integration_time_milliseconds) {
+        let mut timing: Timing = match &context.as_ref().map(|c| c.corr_int_time_ms) {
             Some(500) => Timing {
                 corr_dump_time: 0.5,
                 corr_dumps_per_cadence_patch: 128,
@@ -340,7 +340,7 @@ impl Opts {
             || timing.num_integration_bins_peel == 0
         {
             bail!("At least one of the timing fields was zero:\n{:?}\n\nIf you didn't specify any, it's possible that mongoose does not currently handle this integration time{}", timing, match context {
-                Some(c) => format!(" ({}s)", c.integration_time_milliseconds as f64 / 1e3),
+                Some(c) => format!(" ({}s)", c.corr_int_time_ms as f64 / 1e3),
                 None => "".to_string(),
             })
         }
@@ -363,7 +363,7 @@ impl Opts {
         } else {
             ensure!(context.is_some(), "Neither --num-fine-chans nor --metafits were specified; cannot get the number of fine channels.");
             let c = context.as_ref().unwrap();
-            match c.fine_channel_width_hz {
+            match c.corr_fine_chan_width_hz {
                 40000 => 32,  // 40 kHz
                 20000 => 64,  // 20 kHz
                 10000 => 128, // 10 kHz
@@ -383,7 +383,7 @@ impl Opts {
         } else {
             ensure!(context.is_some(), "Neither --fine-chan-width nor --metafits were specified; cannot get the fine channel width.");
             let c = context.as_ref().unwrap();
-            c.fine_channel_width_hz as f64 / 1e6
+            c.corr_fine_chan_width_hz as f64 / 1e6
         };
 
         // The magical base frequency is equal to:
@@ -396,10 +396,7 @@ impl Opts {
                 "Neither --base-freq nor --metafits were specified; cannot get the base frequency."
             );
             let c = context.as_ref().unwrap();
-            (c.metafits_centre_freq_hz
-                - c.observation_bandwidth_hz / 2
-                - c.fine_channel_width_hz / 2) as f64
-                / 1e6
+            (c.centre_freq_hz - c.obs_bandwidth_hz / 2 - c.corr_fine_chan_width_hz / 2) as f64 / 1e6
         };
 
         // Use the forced value, if provided.
@@ -462,14 +459,10 @@ impl Opts {
                     context.is_some(),
                     "Neither --subband-ids nor --metafits were specified; cannot get the subbands."
                 );
-                let c = context.as_ref().unwrap();
-                let mut cc: Vec<u8> = c
-                    .coarse_channels
-                    .iter()
-                    .map(|cc| cc.gpubox_number as _)
-                    .collect();
-                cc.sort_unstable();
-                cc
+                (0..context.unwrap().num_coarse_chans)
+                    .into_iter()
+                    .map(|cc| cc as _)
+                    .collect()
             }
         };
 
