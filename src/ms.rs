@@ -93,3 +93,16 @@ pub fn casacore_utc_to_epoch(utc_seconds: f64) -> Epoch {
     };
     Epoch::from_tai_seconds(utc_seconds - epoch_diff + num_leap_seconds)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_casacore_mjd_to_epoch() {
+        // This MJD is taken from the 1065880128 observation.
+        let mjd = 4888561712.0;
+        let epoch = casacore_utc_to_epoch(mjd);
+        assert_eq!(epoch.as_gregorian_utc_str(), "2013-10-15T13:48:32 UTC");
+    }
+}

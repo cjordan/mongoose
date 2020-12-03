@@ -217,6 +217,7 @@ mod tests {
             .arg("--metafits=tests/1065880128.metafits")
             .arg("--srclist=Cargo.toml")
             .arg("--use-fee-beam")
+            .env_remove("MWA_BEAM_FILE")
             .assert()
             .failure();
 
