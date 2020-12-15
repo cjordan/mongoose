@@ -9,29 +9,20 @@
 use std::ffi::CString;
 use std::path::PathBuf;
 
+use erfa_sys::{eraGd2gc, eraGmst06, ERFA_DJM0, ERFA_WGS84};
 use fitsio::{errors::check_status as fits_check_status, FitsFile};
 use hifitime::Epoch;
 use ndarray::ArrayView2;
 
 use super::error::*;
 use crate::coords::XYZ;
-use crate::erfa::{eraGd2gc, eraGmst06, ERFA_DJM0, ERFA_WGS84};
 use crate::time::*;
 
 /// Helper function to convert strings into pointers to C strings.
-///
-/// This is currently intended for use only with MWA tile names (e.g. Tile104),
-/// and due to a bug in rubbl_casatables, the first string pulled out of a
-/// measurement set's column is always null; this function assumes that null
-/// string is Tile011.
 fn rust_strings_to_c_strings(strings: &[String]) -> Result<Vec<*mut i8>, std::ffi::NulError> {
     let mut c_strings = Vec::with_capacity(strings.len());
     for s in strings {
-        // let c_str = CString::new(s.as_str())?;
-
-        // If CString::new fails, assume this is the first tile name, and assume
-        // the correct tile name. Hopefully this is a fixable bug.
-        let c_str = CString::new(s.as_str()).unwrap_or_else(|_| CString::new("Tile011").unwrap());
+        let c_str = CString::new(s.as_str())?;
         c_strings.push(c_str.into_raw());
     }
     Ok(c_strings)

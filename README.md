@@ -215,19 +215,16 @@ rts-in-file-generator peel \
 
 - [erfa](https://github.com/liberfa/erfa)
 
-- libclang
-
-  This is a system library needed for some of `mongoose`'s dependencies.
-
-  On Ubuntu, this library is provided by the package `libclang-dev`.
-
-  On Arch, it is provided by the package `clang`.
+  Optional; see below.
 
 ### mongoose-specific instructions
 
 - Compile the source
 
     `cargo build --release`
+
+  Provide `--features erfa-static` to `cargo` to compile ERFA automatically.
+  Requires a C compiler.
 
 - Run a compiled binary
 

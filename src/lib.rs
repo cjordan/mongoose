@@ -4,7 +4,6 @@
 
 pub mod coords;
 pub mod cotter;
-pub mod erfa;
 pub mod fits;
 pub mod ms;
 pub mod rts;
