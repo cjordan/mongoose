@@ -442,9 +442,9 @@ checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
 
 [[package]]
 name = "erfa-sys"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b35fdede403b79d3db0f9f49c32c6d3605caf1feb8900c1a160fbba4e53fc6bd"
+checksum = "1233c4552f41a232c35c723063b2666a10d0f528c3db2a6a1fac559674f3b606"
 dependencies = [
  "autotools",
  "pkg-config",
@@ -721,7 +721,7 @@ dependencies = [
 
 [[package]]
 name = "mongoose"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "approx",
@@ -738,7 +738,6 @@ dependencies = [
  "mwalib",
  "ndarray",
  "num-complex",
- "rayon",
  "rubbl_casatables",
  "structopt",
  "tempfile",

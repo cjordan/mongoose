@@ -12,11 +12,10 @@ use fitsio::FitsFile;
 use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array2, Axis};
 use num_complex::Complex32;
-use rayon::prelude::*;
 use rubbl_casatables::{Table, TableOpenMode};
 use structopt::StructOpt;
 
-use mongoose::fits::uvfits::*;
+use mongoose::fits::{error::UvfitsError, uvfits::*};
 use mongoose::ms::*;
 use mongoose::VELC;
 
@@ -130,12 +129,15 @@ fn main() -> Result<(), anyhow::Error> {
         (radec[0], radec[1])
     };
 
-    // Create and edit our output uvfits files. Because this is fairly slow,
-    // we'll do it in parallel.
-    let mut uvfits_filenames = Vec::with_capacity(coarse_bands.len());
-    coarse_bands
-        .par_iter()
-        .map(|&band| {
+    // Create and edit our output uvfits files.
+    let pb = ProgressBar::new(coarse_bands.len() as u64);
+    pb.set_style(ProgressStyle::default_bar()
+                 .template("{msg}{percent}% [{bar:34.cyan/blue}] {pos}/{len} uvfits files [{elapsed_precise}<{eta_precise}]")
+                 .progress_chars("#>-"));
+    let uvfits_filenames = coarse_bands
+        .iter()
+        .enumerate()
+        .map(|(i, &band)| {
             let centre_chan = (coarse_chan_width_hz / fine_chan_width_hz / 2.0).round() as u32;
             // The RTS expects this frequency...
             let centre_freq = fine_chan_freqs_hz[0]
@@ -162,11 +164,14 @@ fn main() -> Result<(), anyhow::Error> {
                 ra_pointing_rad,
                 dec_pointing_rad,
                 None,
-            )
-            .expect("Failed to make a uvfits file.");
-            filename
+            )?;
+            pb.set_position(i as u64);
+
+            Ok(filename)
         })
-        .collect_into_vec(&mut uvfits_filenames);
+        .collect::<Result<Vec<_>, UvfitsError>>()?;
+    pb.finish();
+
     let mut uvfits = Vec::with_capacity(coarse_bands.len());
     for f in uvfits_filenames {
         let u = FitsFile::edit(f)?;
@@ -206,13 +211,9 @@ fn main() -> Result<(), anyhow::Error> {
         // uvfits rows for each fine channel frequency.
         let mut row_num: u64 = 0;
         let pb = ProgressBar::new(num_rows);
-        pb.set_style(
-        ProgressStyle::default_bar()
-            .template(
-                "{msg}{percent}% [{bar:34.cyan/blue}] {pos}/{len} rows [{elapsed_precise}<{eta_precise}]",
-            )
-            .progress_chars("#>-"),
-    );
+        pb.set_style(ProgressStyle::default_bar()
+                     .template("{msg}{percent}% [{bar:34.cyan/blue}] {pos}/{len} rows [{elapsed_precise}<{eta_precise}]")
+                     .progress_chars("#>-"));
         ms.for_each_row(|row| {
             // Get the uvw coordinates.
             let uvw: Vec<f64> = row.get_cell("UVW").unwrap();
