@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, ensure};
 use mwalib::mwalibContext;
-use structopt::StructOpt;
+use structopt::{clap::AppSettings, StructOpt};
 
 use mongoose::rts::*;
 
@@ -25,7 +25,7 @@ struct Timing {
 
 /// Generate a .in file suitable for RTS usage
 #[derive(StructOpt, Debug)]
-#[structopt(name = "rts-in-file-generator")]
+#[structopt(name = "rts-in-file-generator", global_settings = &[AppSettings::ColoredHelp, AppSettings::ArgRequiredElseHelp])]
 enum Opts {
     /// Run the RTS in "patch" mode (direction-independent calibration)
     ///

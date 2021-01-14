@@ -13,7 +13,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use ndarray::{Array2, Axis};
 use num_complex::Complex32;
 use rubbl_casatables::{Table, TableOpenMode};
-use structopt::StructOpt;
+use structopt::{clap::AppSettings, StructOpt};
 
 use mongoose::fits::{error::UvfitsError, uvfits::*};
 use mongoose::ms::*;
@@ -21,7 +21,7 @@ use mongoose::VELC;
 
 /// Convert an input measurement set to RTS-readable uvfits files.
 #[derive(StructOpt, Debug)]
-#[structopt(name = "ms-to-uvfits")]
+#[structopt(name = "ms-to-uvfits", global_settings = &[AppSettings::ColoredHelp, AppSettings::ArgRequiredElseHelp])]
 struct Opts {
     /// The measurement set to be converted.
     #[structopt(name = "MEASUREMENT_SET", parse(from_str))]

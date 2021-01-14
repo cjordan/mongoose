@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use anyhow::bail;
-use structopt::StructOpt;
+use structopt::{clap::AppSettings, StructOpt};
 
 use mongoose::cotter::Occupancy;
 
@@ -11,7 +11,7 @@ use mongoose::cotter::Occupancy;
 /// are named 1?????????_??.mwaf in the current directory, and the resulting
 /// flags are written to RTS_1?????????_??.mwaf.
 #[derive(StructOpt, Debug)]
-#[structopt(name = "reflag-mwaf-files")]
+#[structopt(name = "reflag-mwaf-files", global_settings = &[AppSettings::ColoredHelp, AppSettings::ArgRequiredElseHelp])]
 struct Opts {
     /// The fraction of channels that must be flagged before we flag the entire
     /// channel. Must be between 0 and 1.
