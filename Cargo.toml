@@ -1,6 +1,6 @@
 [package]
 name = "mongoose"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["Christopher H. Jordan <christopherjordan87@gmail.com>"]
 edition = "2018"
 license = "MPL-2.0"
@@ -31,7 +31,7 @@ globset = "0.4.6"
 hifitime = "1.0.11"
 indicatif = "0.15.0"
 itertools = "0.9.0"
-mwalib = { git = "https://github.com/MWATelescope/mwalib", tag = "v0.4.3" }
+mwalib = { git = "https://github.com/MWATelescope/mwalib", tag = "v0.4.4" }
 ndarray = "0.14.0"
 num-complex = "0.3.1"
 rubbl_casatables = "0.2.2"

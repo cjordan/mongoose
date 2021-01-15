@@ -1,0 +1,48 @@
+---
+name: "Release"
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    name: "Compile a Release"
+    runs-on: ubuntu-18.04
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: build
+      uses: docker://chjordan/maturin:latest
+      with:
+        entrypoint: /bin/bash
+        args: .github/workflows/build.sh
+
+    # Because we've compiled cfitsio and ERFA into mongoose products, we legally
+    # must distribute their licenses with the products.
+    - name: Get licenses
+      run: |
+        curl https://heasarc.gsfc.nasa.gov/FTP/software/fitsio/c/License.txt -o LICENSE-cfitsio
+        curl https://github.com/liberfa/erfa/blob/master/LICENSE -o LICENSE-erfa
+
+    - name: Create new release asset tarballs
+      run: |
+        mkdir release
+        sudo find target/release -maxdepth 1 -executable -type f -exec mv {} ./release \;
+        sudo mv LICENSE-cfitsio LICENSE-erfa ./release
+        cd ./release
+        tar -acvf mongoose-$(git describe --tags).tar.gz *
+        cd ..
+        mv ./release/*.tar.gz .
+
+    - name: Provide new release asset
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        prerelease: false
+        files: |
+          *.tar.gz
