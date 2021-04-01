@@ -17,7 +17,6 @@ cd cfitsio-3.49
 CFLAGS="-O3" ./configure --prefix="${PWD}" --enable-reentrant --enable-ssse3 --enable-sse2 --disable-curl
 make -j install
 cd ..
-PKG_CONFIG_PATH=./cfitsio-3.49/lib/pkgconfig
 
 curl -L "https://github.com/liberfa/erfa/releases/download/v1.7.2/erfa-1.7.2.tar.gz" -o erfa-1.7.2.tar.gz
 tar -xf erfa-1.7.2.tar.gz
@@ -25,7 +24,6 @@ cd erfa-1.7.2
 CFLAGS="-O3" ./configure --prefix="${PWD}"
 make -j install
 cd ..
-PKG_CONFIG_PATH+=:./erfa-1.7.2/lib/pkgconfig
 
 # Build
-PKG_CONFIG_ALL_STATIC=1 cargo build --release
+PKG_CONFIG_PATH+=./cfitsio-3.49:./erfa-1.7.2 PKG_CONFIG_ALL_STATIC=1 cargo build --release
