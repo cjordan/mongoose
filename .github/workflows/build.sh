@@ -26,4 +26,4 @@ make -j install
 cd ..
 
 # Build
-PKG_CONFIG_PATH+=./cfitsio-3.49:./erfa-1.7.2 PKG_CONFIG_ALL_STATIC=1 cargo build --release
+PKG_CONFIG_PATH=./cfitsio-3.49:./erfa-1.7.2 PKG_CONFIG_ALL_STATIC=1 cargo build --release
