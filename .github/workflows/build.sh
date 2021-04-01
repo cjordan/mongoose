@@ -25,9 +25,7 @@ cd erfa-1.7.2
 CFLAGS="-O3" ./configure --prefix="${PWD}"
 make -j install
 cd ..
-PKG_CONFIG_PATH+=:./erfa-1.72/lib/pkgconfig
-
-export PKG_CONFIG_PATH
+PKG_CONFIG_PATH+=:./erfa-1.7.2/lib/pkgconfig
 
 # Build
 PKG_CONFIG_ALL_STATIC=1 cargo build --release
